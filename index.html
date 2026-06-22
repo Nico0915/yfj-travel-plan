@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>yfj_travel_plan</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f5f4f0; color: #2c2c2a; font-size: 13px; }
+
+  .app { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+  .header h1 { font-size: 18px; font-weight: 500; }
+  .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  .btn { padding: 6px 14px; border-radius: 6px; border: 0.5px solid #b4b2a9; background: #fff; color: #2c2c2a; font-size: 12px; cursor: pointer; transition: background 0.15s; }
+  .btn:hover { background: #f1efe8; }
+  .btn-primary { background: #185FA5; color: #fff; border-color: #185FA5; }
+  .btn-primary:hover { background: #0c447c; }
+
+  .sync-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 12px; color: #3B6D11; background: #eaf3de; border-radius: 8px; padding: 8px 12px; }
+  .sync-bar.saving { color: #5f5e5a; background: #f1efe8; }
+  .sync-bar.error { color: #a32d2d; background: #fcebeb; }
+  .sync-dot { width: 8px; height: 8px; border-radius: 50%; background: #3B6D11; }
+  .sync-bar.saving .sync-dot { background: #EF9F27; animation: pulse 1s infinite; }
+  .sync-bar.error .sync-dot { background: #E24B4A; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .month-nav { display: flex; align-items: center; gap: 12px; }
+  .month-nav button { width: 28px; height: 28px; border-radius: 50%; border: 0.5px solid #b4b2a9; background: #fff; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+  .month-nav button:hover { background: #f1efe8; }
+  .month-label { font-size: 15px; font-weight: 500; min-width: 100px; text-align: center; }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #5f5e5a; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+  .gantt-wrap { background: #fff; border-radius: 10px; border: 0.5px solid #d3d1c7; overflow-x: auto; }
+
+  .gantt-header { display: flex; border-bottom: 0.5px solid #d3d1c7; position: sticky; top: 0; background: #fff; z-index: 10; }
+  .gantt-label-col { min-width: 110px; width: 110px; padding: 8px 10px; font-size: 11px; color: #888780; border-right: 0.5px solid #d3d1c7; flex-shrink: 0; }
+  .gantt-days { display: flex; flex: 1; }
+  .day-header { flex: 1; min-width: 28px; text-align: center; padding: 6px 2px; font-size: 11px; color: #888780; border-right: 0.5px solid #f1efe8; user-select: none; }
+  .day-header.today { background: #e6f1fb; color: #185FA5; font-weight: 500; }
+  .day-header.weekend { color: #d85a30; }
+  .day-num { font-size: 12px; font-weight: 500; display: block; }
+  .day-week { font-size: 10px; display: block; }
+
+  .gantt-body { }
+  .gantt-row { display: flex; border-bottom: 0.5px solid #f1efe8; min-height: 44px; }
+  .gantt-row:last-child { border-bottom: none; }
+  .gantt-row-label { min-width: 110px; width: 110px; padding: 8px 10px; border-right: 0.5px solid #d3d1c7; font-size: 12px; font-weight: 500; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; color: #444441; }
+  .gantt-row-label .person-del { cursor: pointer; opacity: 0; font-size: 14px; color: #E24B4A; transition: opacity 0.15s; margin-left: auto; padding-left: 4px; flex-shrink: 0; }
+  .gantt-row-label:hover .person-del { opacity: 0.7; }
+  .gantt-row-label .person-del:hover { opacity: 1; }
+
+  .gantt-cells { display: flex; flex: 1; position: relative; }
+  .gantt-cell { flex: 1; min-width: 28px; border-right: 0.5px solid #f1efe8; cursor: pointer; transition: background 0.1s; position: relative; }
+  .gantt-cell:hover { background: #e6f1fb22; }
+  .gantt-cell.weekend { background: #fafaf8; }
+
+  .trip-block { position: absolute; border-radius: 5px; display: flex; align-items: center; padding: 0 8px; font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; z-index: 5; transition: opacity 0.15s; height: 26px; top: 9px; }
+  .trip-block:hover { opacity: 0.85; }
+  .trip-block.confirmed { background: #185FA5; color: #fff; }
+  .trip-block.planned { background: #EF9F27; color: #fff; }
+  .trip-block.conflict { background: #E24B4A; color: #fff; }
+
+  .trip-block .delete-x { margin-left: 6px; font-size: 13px; opacity: 0.7; flex-shrink: 0; }
+  .trip-block .delete-x:hover { opacity: 1; }
+
+  .add-row-btn { display: flex; align-items: center; justify-content: center; padding: 10px; color: #888780; font-size: 12px; cursor: pointer; border-top: 0.5px dashed #d3d1c7; }
+  .add-row-btn:hover { background: #f5f4f0; color: #444441; }
+
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.25); z-index: 100; display: flex; align-items: center; justify-content: center; }
+  .modal { background: #fff; border-radius: 12px; padding: 24px; min-width: 340px; max-width: 420px; width: 90%; }
+  .modal h3 { font-size: 15px; font-weight: 500; margin-bottom: 16px; }
+  .form-row { margin-bottom: 12px; }
+  .form-row label { display: block; font-size: 12px; color: #5f5e5a; margin-bottom: 4px; }
+  .form-row input, .form-row select { width: 100%; padding: 7px 10px; border: 0.5px solid #b4b2a9; border-radius: 6px; font-size: 13px; outline: none; background: #fff; }
+  .form-row input:focus, .form-row select:focus { border-color: #185FA5; }
+  .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+  .conflict-warn { background: #fcebeb; color: #a32d2d; border-radius: 6px; padding: 8px 10px; font-size: 12px; margin-bottom: 12px; display: none; }
+  .conflict-warn.show { display: block; }
+
+  .person-stats { background: #fff; border-radius: 8px; border: 0.5px solid #d3d1c7; margin-bottom: 20px; overflow: hidden; }
+  .person-stats-row { display: flex; padding: 10px 14px; border-bottom: 0.5px solid #f1efe8; align-items: center; gap: 8px; }
+  .person-stats-row:last-child { border-bottom: none; }
+  .ps-name { font-weight: 500; font-size: 13px; min-width: 70px; color: #444441; }
+  .ps-trips { font-size: 13px; }
+  .ps-trips b { color: #185FA5; }
+  .ps-days { font-size: 13px; }
+  .ps-days b { color: #3B6D11; }
+  .ps-sep { color: #888780; font-size: 12px; }
+
+  .no-trips { text-align: center; padding: 32px; color: #888780; font-size: 13px; }
+
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: #2c2c2a; color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 13px; z-index: 200; opacity: 0; transition: transform 0.3s, opacity 0.3s; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 600px) {
+    .gantt-label-col, .gantt-row-label { min-width: 70px; width: 70px; font-size: 11px; padding: 6px; }
+    .header-actions { gap: 6px; }
+    .btn { padding: 5px 10px; font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <div class="header">
+    <h1>创维安防渠道出差计划-姚发劲</h1>
+    <div class="header-actions">
+      <div class="month-nav">
+        <button id="prevMonth">&#8249;</button>
+        <span class="month-label" id="monthLabel"></span>
+        <button id="nextMonth">&#8250;</button>
+      </div>
+      <button class="btn btn-primary" id="addBtn">+ 新增行程</button>
+      <button class="btn" id="exportBtn">导出明细</button>
+    </div>
+  </div>
+
+  <div class="sync-bar" id="syncBar">
+    <div class="sync-dot"></div>
+    <span id="syncText">正在加载...</span>
+  </div>
+
+  <div class="person-stats" id="personStats"></div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#185FA5"></div>已确认</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#EF9F27"></div>计划中</div>
+    <div class="legend-item" style="font-size:12px; color:#888780; margin-left: 4px;">点击空白格子快速添加 · 点击行程块编辑</div>
+  </div>
+
+  <div class="gantt-wrap" id="ganttWrap"></div>
+
+  <div style="margin-top: 12px; font-size: 11px; color: #888780; text-align: right;">数据保存在云端，任意设备刷新即可同步</div>
+</div>
+
+<!-- 行程弹窗 -->
+<div class="modal-overlay" id="modalOverlay" style="display:none">
+  <div class="modal">
+    <h3 id="modalTitle">新增出差行程</h3>
+    <div class="conflict-warn" id="conflictWarn"></div>
+    <div class="form-row">
+      <label>人员</label>
+      <input type="text" id="fPerson" list="personDatalist" placeholder="选择已有人员或输入新姓名" autocomplete="off" />
+      <datalist id="personDatalist"></datalist>
+    </div>
+    <div class="form-row">
+      <label>目的地</label>
+      <input type="text" id="fDest" placeholder="如：海安、南京、上海" />
+    </div>
+    <div class="form-row">
+      <label>事由 / 备注</label>
+      <input type="text" id="fNote" placeholder="如：拜访代理商、参加展会" />
+    </div>
+    <div class="form-row">
+      <label>开始日期</label>
+      <input type="date" id="fStart" />
+    </div>
+    <div class="form-row">
+      <label>结束日期</label>
+      <input type="date" id="fEnd" />
+    </div>
+    <div class="form-row">
+      <label>状态</label>
+      <select id="fStatus">
+        <option value="confirmed">已确认</option>
+        <option value="planned">计划中</option>
+      </select>
+    </div>
+    <div class="form-actions">
+      <button class="btn" id="cancelBtn">取消</button>
+      <button class="btn btn-primary" id="saveBtn">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function() {
+  // ===== 配置 =====
+  var PANTRY_ID = '091c31b6-f9d5-4e0e-98f5-0bd15e34eddc';
+  var API_URL = 'https://getpantry.cloud/apiv1/pantry/' + PANTRY_ID + '/basket/trips';
+
+  var trips = [];
+  var currentYear = new Date().getFullYear();
+  var currentMonth = new Date().getMonth();
+  var editingId = null;
+  var today = new Date();
+
+  // ===== 工具函数 =====
+  function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
+  function dateStr(y, m, d) { return y + '-' + String(m+1).padStart(2,'0') + '-' + String(d).padStart(2,'0'); }
+  function parseDateStr(s) { var parts = s.split('-').map(Number); return new Date(parts[0], parts[1]-1, parts[2]); }
+
+  function tripOverlaps(a, b) {
+    return a.start <= b.end && a.end >= b.start;
+  }
+
+  function getConflicts() {
+    var ids = {};
+    for (var i = 0; i < trips.length; i++) {
+      for (var j = i+1; j < trips.length; j++) {
+        if (trips[i].person === trips[j].person && tripOverlaps(trips[i], trips[j])) {
+          ids[trips[i].id] = true;
+          ids[trips[j].id] = true;
+        }
+      }
+    }
+    return ids;
+  }
+
+  function getAllPeople() {
+    var names = [];
+    var seen = {};
+    trips.forEach(function(t) {
+      if (t.person && !seen[t.person]) {
+        seen[t.person] = true;
+        names.push(t.person);
+      }
+    });
+    return names.sort(function(a,b) { return a.localeCompare(b, 'zh-CN'); });
+  }
+
+  function countBusyDays(y, m, total) {
+    var busySet = {};
+    var ms = dateStr(y, m, 1);
+    var me = dateStr(y, m, total);
+    trips.forEach(function(t) {
+      if (t.start > me || t.end < ms) return;
+      var sStr = t.start < ms ? ms : t.start;
+      var eStr = t.end > me ? me : t.end;
+      var sd = Math.max(1, parseInt(sStr.split('-')[2]));
+      var ed = Math.min(total, parseInt(eStr.split('-')[2]));
+      for (var d = sd; d <= ed; d++) busySet[d] = true;
+    });
+    return Object.keys(busySet).length;
+  }
+
+  function countPersonBusyDays(y, m, total, personName) {
+    var busySet = {};
+    var ms = dateStr(y, m, 1);
+    var me = dateStr(y, m, total);
+    trips.forEach(function(t) {
+      if (t.person !== personName) return;
+      if (t.start > me || t.end < ms) return;
+      var sStr = t.start < ms ? ms : t.start;
+      var eStr = t.end > me ? me : t.end;
+      var sd = Math.max(1, parseInt(sStr.split('-')[2]));
+      var ed = Math.min(total, parseInt(eStr.split('-')[2]));
+      for (var d = sd; d <= ed; d++) busySet[d] = true;
+    });
+    return Object.keys(busySet).length;
+  }
+
+  function showToast(msg) {
+    var toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(function() { toast.classList.remove('show'); }, 3000);
+  }
+
+  function setSyncStatus(status, text) {
+    var bar = document.getElementById('syncBar');
+    var span = document.getElementById('syncText');
+    bar.className = 'sync-bar ' + (status || '');
+    span.textContent = text;
+  }
+
+  // ===== 云端存储 =====
+  function cloudLoad() {
+    return fetch(API_URL).then(function(res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }).then(function(obj) {
+      var data = obj.data;
+      if (Array.isArray(data)) {
+        trips = data;
+      } else if (Array.isArray(obj)) {
+        trips = obj;
+      } else {
+        trips = [];
+      }
+      setSyncStatus('', '已同步 — 所有设备共享同一份数据');
+      try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e) {}
+      render();
+    }).catch(function(e) {
+      console.warn('Pantry load failed:', e);
+      setSyncStatus('error', '云端暂不可达 — 使用本地缓存数据');
+      try { trips = JSON.parse(localStorage.getItem('yfj_travel_backup') || '[]'); } catch(e2) { trips = []; }
+      render();
+    });
+  }
+
+  function cloudSave() {
+    setSyncStatus('saving', '正在同步到云端...');
+    return fetch(API_URL, { method: 'DELETE' }).then(function() {
+      return fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: trips })
+      });
+    }).then(function(res) {
+      if (res.ok) {
+        try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e) {}
+        setSyncStatus('', '已同步 — 所有设备共享同一份数据');
+        return true;
+      }
+      throw new Error('Save HTTP ' + res.status);
+    }).catch(function(e) {
+      console.warn('Pantry save failed:', e);
+      try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e2) {}
+      setSyncStatus('error', '同步失败 — 数据已保存在本地，稍后刷新重试');
+      return false;
+    });
+  }
+
+  // ===== 渲染 =====
+  function render() {
+    try {
+      var totalDays = daysInMonth(currentYear, currentMonth);
+      var weekDays = ['日','一','二','三','四','五','六'];
+
+      document.getElementById('monthLabel').textContent = currentYear + '年' + (currentMonth+1) + '月';
+
+      var monthStart = dateStr(currentYear, currentMonth, 1);
+      var monthEnd = dateStr(currentYear, currentMonth, totalDays);
+
+      var monthTrips = trips.filter(function(t) { return t.start <= monthEnd && t.end >= monthStart; });
+
+      // 按人员统计
+      var personStatsEl = document.getElementById('personStats');
+      var peopleInMonth = {};
+      monthTrips.forEach(function(t) {
+        var p = t.person || '(未分配)';
+        if (!peopleInMonth[p]) peopleInMonth[p] = { trips: 0 };
+        peopleInMonth[p].trips++;
+      });
+      var personOrder = Object.keys(peopleInMonth).sort(function(a,b) { return a.localeCompare(b, 'zh-CN'); });
+      var statsHTML = '';
+      if (personOrder.length === 0) {
+        statsHTML = '<div class="person-stats-row" style="color:#888780;font-size:12px">本月暂无出差行程</div>';
+      } else {
+        personOrder.forEach(function(pName) {
+          var pDays = countPersonBusyDays(currentYear, currentMonth, totalDays, pName);
+          statsHTML += '<div class="person-stats-row"><span class="ps-name">' + pName + '</span><span class="ps-trips"><b>' + peopleInMonth[pName].trips + '</b>行程</span><span class="ps-sep">·</span><span class="ps-days"><b>' + pDays + '</b>天出差</span></div>';
+        });
+      }
+      personStatsEl.innerHTML = statsHTML;
+
+      var wrap = document.getElementById('ganttWrap');
+      wrap.innerHTML = '';
+
+      // 表头
+      var headerHTML = '<div class="gantt-header"><div class="gantt-label-col">人员</div><div class="gantt-days">';
+      for (var d = 1; d <= totalDays; d++) {
+        var dt = new Date(currentYear, currentMonth, d);
+        var isToday = (dt.toDateString() === today.toDateString());
+        var isWeekend = (dt.getDay() === 0 || dt.getDay() === 6);
+        var cls = 'day-header' + (isToday ? ' today' : '') + (isWeekend ? ' weekend' : '');
+        headerHTML += '<div class="' + cls + '"><span class="day-num">' + d + '</span><span class="day-week">' + weekDays[dt.getDay()] + '</span></div>';
+      }
+      headerHTML += '</div></div>';
+      wrap.innerHTML = headerHTML;
+
+      // 按人员分组
+      var peopleGroups = {};
+      var visibleTrips = trips.filter(function(t) { return t.start <= monthEnd && t.end >= monthStart; });
+      visibleTrips.forEach(function(t) {
+        var p = t.person || '(未分配)';
+        if (!peopleGroups[p]) peopleGroups[p] = [];
+        peopleGroups[p].push(t);
+      });
+
+      var peopleOrder = Object.keys(peopleGroups).sort(function(a,b) { return a.localeCompare(b, 'zh-CN'); });
+
+      var bodyHTML = '';
+
+      if (peopleOrder.length === 0) {
+        bodyHTML = '<div class="no-trips">本月暂无出差行程，点击上方「新增行程」开始规划</div>';
+      } else {
+        peopleOrder.forEach(function(personName) {
+          var personTrips = peopleGroups[personName];
+          bodyHTML += '<div class="gantt-row">';
+          bodyHTML += '<div class="gantt-row-label"><span>' + personName + '</span><span class="person-del" title="删除此人所有行程" data-person="' + personName + '">×</span></div>';
+          bodyHTML += '<div class="gantt-cells">';
+
+          // 背景网格
+          for (var d = 1; d <= totalDays; d++) {
+            var dt2 = new Date(currentYear, currentMonth, d);
+            var isWknd = (dt2.getDay() === 0 || dt2.getDay() === 6);
+            bodyHTML += '<div class="gantt-cell' + (isWknd ? ' weekend' : '') + '" data-day="' + d + '" data-person="' + personName + '"></div>';
+          }
+
+          // 行程色块
+          personTrips.forEach(function(trip) {
+            var cs = trip.start < monthStart ? monthStart : trip.start;
+            var ce = trip.end > monthEnd ? monthEnd : trip.end;
+            var startDay = parseInt(cs.split('-')[2]);
+            var endDay = parseInt(ce.split('-')[2]);
+
+            var blockClass = 'trip-block ' + trip.status;
+
+            var startPct = (startDay - 1) / totalDays * 100;
+            var widthPct = (endDay - startDay + 1) / totalDays * 100;
+
+            var label2 = trip.note ? (trip.dest + ' · ' + trip.note) : trip.dest;
+            var titleStr = personName + ' · ' + trip.dest + '\n' + trip.start + ' ~ ' + trip.end + (trip.note ? '\n' + trip.note : '');
+
+            bodyHTML += '<div class="' + blockClass + '" style="left:calc(' + startPct + '% + 1px);width:calc(' + widthPct + '% - 2px)" data-trip-id="' + trip.id + '" title="' + titleStr.replace(/"/g, '&quot;') + '">';
+            bodyHTML += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">' + label2 + '</span>';
+            bodyHTML += '<span class="delete-x" title="删除" data-del-id="' + trip.id + '">×</span>';
+            bodyHTML += '</div>';
+          });
+
+          bodyHTML += '</div></div>';
+        });
+      }
+
+      bodyHTML += '<div class="add-row-btn" id="addRowBtn">+ 添加出差行程</div>';
+      wrap.innerHTML = headerHTML + bodyHTML;
+
+      // 绑定事件
+      wrap.querySelectorAll('.gantt-cell').forEach(function(cell) {
+        cell.addEventListener('click', function() {
+          var day = parseInt(cell.getAttribute('data-day'));
+          var person = cell.getAttribute('data-person');
+          openQuickAdd(day, person);
+        });
+      });
+
+      wrap.querySelectorAll('.trip-block').forEach(function(block) {
+        block.addEventListener('click', function(e) {
+          if (e.target.classList.contains('delete-x')) return;
+          var tripId = block.getAttribute('data-trip-id');
+          openEditModal(tripId);
+        });
+      });
+
+      wrap.querySelectorAll('.delete-x').forEach(function(x) {
+        x.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var tripId = x.getAttribute('data-del-id');
+          deleteTrip(tripId);
+        });
+      });
+
+      wrap.querySelectorAll('.person-del').forEach(function(el) {
+        el.addEventListener('click', function() {
+          var name = el.getAttribute('data-person');
+          removePerson(name);
+        });
+      });
+
+      var addRowBtn = document.getElementById('addRowBtn');
+      if (addRowBtn) addRowBtn.addEventListener('click', function() { openAddModal(); });
+
+      // 更新人员 datalist
+      refreshPersonDatalist();
+    } catch(err) {
+      console.error('render error:', err);
+    }
+  }
+
+  // ===== 人员管理 =====
+  function removePerson(name) {
+    if (!confirm('确定删除「' + name + '」的所有行程？')) return;
+    trips = trips.filter(function(t) { return t.person !== name; });
+    render();
+    cloudSave();
+    showToast('已删除 ' + name + ' 的所有行程');
+  }
+
+  function refreshPersonDatalist() {
+    var dl = document.getElementById('personDatalist');
+    if (!dl) return;
+    dl.innerHTML = '';
+    getAllPeople().forEach(function(p) {
+      var opt = document.createElement('option');
+      opt.value = p;
+      dl.appendChild(opt);
+    });
+  }
+
+  // ===== 表单操作 =====
+  function openAddModal(prefill) {
+    editingId = null;
+    document.getElementById('modalTitle').textContent = '新增出差行程';
+    document.getElementById('fPerson').value = prefill ? (prefill.person || '') : '';
+    document.getElementById('fDest').value = '';
+    document.getElementById('fNote').value = '';
+    document.getElementById('fStart').value = prefill ? prefill.start : dateStr(currentYear, currentMonth, 1);
+    document.getElementById('fEnd').value = prefill ? prefill.end : dateStr(currentYear, currentMonth, 1);
+    document.getElementById('fStatus').value = 'planned';
+    document.getElementById('conflictWarn').classList.remove('show');
+    refreshPersonDatalist();
+    document.getElementById('modalOverlay').style.display = 'flex';
+    document.getElementById('fPerson').focus();
+  }
+
+  function openQuickAdd(day, personName) {
+    var ds = dateStr(currentYear, currentMonth, day);
+    openAddModal({ start: ds, end: ds, person: personName });
+  }
+
+  function openEditModal(id) {
+    var trip = null;
+    for (var i = 0; i < trips.length; i++) {
+      if (trips[i].id === id) { trip = trips[i]; break; }
+    }
+    if (!trip) return;
+    editingId = id;
+    document.getElementById('modalTitle').textContent = '编辑出差行程';
+    refreshPersonDatalist();
+    document.getElementById('fPerson').value = trip.person || '';
+    document.getElementById('fDest').value = trip.dest;
+    document.getElementById('fNote').value = trip.note || '';
+    document.getElementById('fStart').value = trip.start;
+    document.getElementById('fEnd').value = trip.end;
+    document.getElementById('fStatus').value = trip.status;
+    document.getElementById('conflictWarn').classList.remove('show');
+    document.getElementById('modalOverlay').style.display = 'flex';
+  }
+
+  function closeModal() {
+    document.getElementById('modalOverlay').style.display = 'none';
+  }
+
+  function saveTrip() {
+    var person = document.getElementById('fPerson').value.trim();
+    var dest = document.getElementById('fDest').value.trim();
+    var note = document.getElementById('fNote').value.trim();
+    var start = document.getElementById('fStart').value;
+    var end = document.getElementById('fEnd').value;
+    var status = document.getElementById('fStatus').value;
+
+    if (!person) { showToast('请输入人员姓名'); document.getElementById('fPerson').focus(); return; }
+    if (!dest) { showToast('请输入目的地'); document.getElementById('fDest').focus(); return; }
+    if (!start || !end) { showToast('请选择日期'); return; }
+    if (start > end) { showToast('结束日期不能早于开始日期'); return; }
+
+    var newTrip = { id: editingId || ('t' + Date.now()), person: person, dest: dest, note: note, start: start, end: end, status: status };
+
+    // 冲突检测：同一人员同一时间段不能有两条行程
+    var conflicting = trips.filter(function(t) {
+      return t.id !== newTrip.id && t.person === newTrip.person && tripOverlaps(newTrip, t);
+    });
+
+    if (conflicting.length > 0) {
+      var warn = document.getElementById('conflictWarn');
+      var conflictList = conflicting.map(function(t) { return t.dest + '（' + t.start + ' ~ ' + t.end + '）'; }).join('、');
+      warn.innerHTML = '<b>存在行程冲突，请更改日期后再保存。</b><br>「' + person + '」在该时间段已有行程：' + conflictList;
+      warn.classList.add('show');
+      showToast('存在行程冲突，请更改日期');
+      return;
+    }
+
+    document.getElementById('conflictWarn').classList.remove('show');
+
+    if (editingId) {
+      for (var i = 0; i < trips.length; i++) {
+        if (trips[i].id === editingId) { trips[i] = newTrip; break; }
+      }
+    } else {
+      trips.push(newTrip);
+    }
+
+    closeModal();
+    render();
+    cloudSave();
+  }
+
+  function deleteTrip(id) {
+    if (confirm('确定删除这条出差行程？')) {
+      trips = trips.filter(function(t) { return t.id !== id; });
+      render();
+      cloudSave();
+    }
+  }
+
+  // ===== 导出 CSV =====
+  function exportCSV() {
+    if (trips.length === 0) { showToast('暂无数据可导出'); return; }
+    var conflictIds = getConflicts();
+    var csv = '\uFEFF人员,目的地,事由,开始日期,结束日期,出差天数,状态,是否冲突\n';
+    var sorted = trips.slice().sort(function(a,b) {
+      if (a.person !== b.person) return (a.person||'').localeCompare(b.person||'', 'zh-CN');
+      return a.start < b.start ? -1 : 1;
+    });
+    sorted.forEach(function(t) {
+      var days = Math.round((parseDateStr(t.end) - parseDateStr(t.start)) / 86400000) + 1;
+      var statusText = t.status === 'confirmed' ? '已确认' : '计划中';
+      var conflictText = conflictIds[t.id] ? '冲突' : '';
+      csv += (t.person||'') + ',' + t.dest + ',' + (t.note||'') + ',' + t.start + ',' + t.end + ',' + days + ',' + statusText + ',' + conflictText + '\n';
+    });
+    var blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = '出差明细_' + currentYear + String(currentMonth+1).padStart(2,'0') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('CSV 已导出，可用 Excel 打开');
+  }
+
+  // ===== 事件绑定 =====
+  document.getElementById('addBtn').addEventListener('click', function() { openAddModal(); });
+  document.getElementById('exportBtn').addEventListener('click', exportCSV);
+  document.getElementById('cancelBtn').addEventListener('click', closeModal);
+  document.getElementById('saveBtn').addEventListener('click', saveTrip);
+  document.getElementById('modalOverlay').addEventListener('click', function(e) {
+    if (e.target === document.getElementById('modalOverlay')) closeModal();
+  });
+  document.getElementById('prevMonth').addEventListener('click', function() {
+    currentMonth--;
+    if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+    render();
+  });
+  document.getElementById('nextMonth').addEventListener('click', function() {
+    currentMonth++;
+    if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+    render();
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeModal();
+  });
+
+  // ===== 启动 =====
+  cloudLoad();
+})();
+</script>
+</body>
+</html>
