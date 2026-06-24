@@ -306,7 +306,7 @@
       _cloudSyncDone = true;
       try { localStorage.setItem('yfj_travel_backup', JSON.stringify(cloudTrips)); } catch(e) {}
       // 如果模态框正在打开（用户正在编辑），不覆盖当前 trips，只更新缓存
-      var modal = document.getElementById('modal');
+      var modal = document.getElementById('modalOverlay');
       if (modal && modal.style.display === 'flex') {
         setSyncStatus('', '已同步（当前编辑完成后生效）');
         // 把云端数据暂存，等保存/取消后合并
