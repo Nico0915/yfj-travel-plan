@@ -184,8 +184,7 @@
 <script>
 (function() {
   // ===== 配置 =====
-  var PANTRY_ID = '091c31b6-f9d5-4e0e-98f5-0bd15e34eddc';
-  var API_URL = 'https://getpantry.cloud/apiv1/pantry/' + PANTRY_ID + '/basket/trips';
+  var API_URL = 'https://yfj-travel-api.nicolewong19.workers.dev/';
 
   var trips = [];
   var currentYear = new Date().getFullYear();
@@ -294,10 +293,9 @@
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.json();
     }).then(function(obj) {
-      var data = obj.data;
       var cloudTrips;
-      if (Array.isArray(data)) {
-        cloudTrips = data;
+      if (obj.data && Array.isArray(obj.data)) {
+        cloudTrips = obj.data;
       } else if (Array.isArray(obj)) {
         cloudTrips = obj;
       } else {
@@ -309,7 +307,6 @@
       var modal = document.getElementById('modalOverlay');
       if (modal && modal.style.display === 'flex') {
         setSyncStatus('', '已同步（当前编辑完成后生效）');
-        // 把云端数据暂存，等保存/取消后合并
         window._pendingCloudTrips = cloudTrips;
       } else {
         trips = cloudTrips;
@@ -317,7 +314,7 @@
         render();
       }
     }).catch(function(e) {
-      console.warn('Pantry load failed:', e);
+      console.warn('Cloud load failed:', e);
       _cloudSyncDone = true;
       if (cached && Array.isArray(cached)) {
         setSyncStatus('error', '云端暂不可达 — 显示本地缓存数据');
@@ -331,21 +328,20 @@
 
   function cloudSave() {
     setSyncStatus('saving', '正在同步到云端...');
-    return fetch(API_URL, { method: 'DELETE' }).then(function() {
-      return fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: trips })
-      });
+    window._pendingCloudTrips = null; // 保存时清除暂存的云端旧数据
+    return fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: trips })
     }).then(function(res) {
       if (res.ok) {
         try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e) {}
-        setSyncStatus('', '已同步 — 所有设备共享同一份数据');
+        setSyncStatus('', '已同步');
         return true;
       }
       throw new Error('Save HTTP ' + res.status);
     }).catch(function(e) {
-      console.warn('Pantry save failed:', e);
+      console.warn('Cloud save failed:', e);
       try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e2) {}
       setSyncStatus('error', '同步失败 — 数据已保存在本地，稍后刷新重试');
       return false;
