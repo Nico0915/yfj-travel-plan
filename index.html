@@ -275,6 +275,18 @@
 
   // ===== 云端存储 =====
   function cloudLoad() {
+    // 立即用本地缓存渲染，无需等待云端
+    var cached = null;
+    try { cached = JSON.parse(localStorage.getItem('yfj_travel_backup') || 'null'); } catch(e) {}
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      trips = cached;
+      setSyncStatus('saving', '正在从云端同步...');
+      render();
+    } else {
+      setSyncStatus('saving', '正在加载...');
+    }
+
+    // 后台拉取云端最新数据
     return fetch(API_URL).then(function(res) {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.json();
@@ -287,14 +299,18 @@
       } else {
         trips = [];
       }
-      setSyncStatus('', '已同步 — 所有设备共享同一份数据');
+      setSyncStatus('', '已同步');
       try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e) {}
       render();
     }).catch(function(e) {
       console.warn('Pantry load failed:', e);
-      setSyncStatus('error', '云端暂不可达 — 使用本地缓存数据');
-      try { trips = JSON.parse(localStorage.getItem('yfj_travel_backup') || '[]'); } catch(e2) { trips = []; }
-      render();
+      if (cached && Array.isArray(cached)) {
+        setSyncStatus('error', '云端暂不可达 — 显示本地缓存数据');
+      } else {
+        setSyncStatus('error', '云端暂不可达');
+        trips = [];
+        render();
+      }
     });
   }
 
