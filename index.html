@@ -99,6 +99,19 @@
   .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: #2c2c2a; color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 13px; z-index: 200; opacity: 0; transition: transform 0.3s, opacity 0.3s; pointer-events: none; }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+  .trip-block .lock-x { margin-left: 6px; font-size: 13px; opacity: 0.35; flex-shrink: 0; cursor: not-allowed; }
+  .trip-block .delete-x.confirm-needed { color: #E24B4A; font-weight: 700; }
+
+  .confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 150; display: flex; align-items: center; justify-content: center; }
+  .confirm-box { background: #fff; border-radius: 12px; padding: 24px; min-width: 280px; max-width: 360px; text-align: center; }
+  .confirm-box p { font-size: 13px; color: #444441; margin-bottom: 16px; line-height: 1.6; }
+  .confirm-box .btn-danger { background: #E24B4A; color: #fff; border-color: #E24B4A; }
+
+  .pull-indicator { display: none; text-align: center; padding: 12px; font-size: 12px; color: #888780; }
+  .pull-indicator.active { display: block; }
+  .pull-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #d3d1c7; border-top-color: #185FA5; border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
   @media (max-width: 600px) {
     .gantt-label-col, .gantt-row-label { min-width: 70px; width: 70px; font-size: 11px; padding: 6px; }
     .header-actions { gap: 6px; }
@@ -109,6 +122,7 @@
 <body>
 
 <div class="app" id="app">
+  <div class="pull-indicator" id="pullIndicator"><span class="pull-spinner" style="display:none"></span><span id="pullText"></span></div>
   <div class="header">
     <h1>创维安防渠道出差计划-姚发劲</h1>
     <div class="header-actions">
@@ -117,6 +131,7 @@
         <span class="month-label" id="monthLabel"></span>
         <button id="nextMonth">&#8250;</button>
       </div>
+      <button class="btn" id="refreshBtn" title="刷新云端数据">刷新</button>
       <button class="btn btn-primary" id="addBtn">+ 新增行程</button>
       <button class="btn" id="exportBtn">导出明细</button>
     </div>
@@ -199,6 +214,11 @@
 
   function tripOverlaps(a, b) {
     return a.start <= b.end && a.end >= b.start;
+  }
+
+  function isExpired(trip) {
+    var todayStr = dateStr(today.getFullYear(), today.getMonth(), today.getDate());
+    return trip.end < todayStr;
   }
 
   function getConflicts() {
@@ -348,6 +368,49 @@
     });
   }
 
+  // 合并后台到达的云端数据到当前 trips（只新增本地没有的行程）
+  function mergePendingCloud() {
+    if (!window._pendingCloudTrips) return;
+    var currentIds = {};
+    trips.forEach(function(t) { currentIds[t.id] = true; });
+    var added = 0;
+    window._pendingCloudTrips.forEach(function(pt) {
+      if (!currentIds[pt.id]) {
+        trips.push(pt);
+        added++;
+      }
+    });
+    window._pendingCloudTrips = null;
+    if (added > 0) {
+      try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e) {}
+    }
+  }
+
+  // 保存后静默检查是否有其他人新增的行程
+  function cloudCheckNew() {
+    return fetch(API_URL).then(function(res) {
+      if (!res.ok) throw new Error('check HTTP ' + res.status);
+      return res.json();
+    }).then(function(obj) {
+      var cloudData = (obj.data && Array.isArray(obj.data)) ? obj.data : (Array.isArray(obj) ? obj : []);
+      var currentIds = {};
+      trips.forEach(function(t) { currentIds[t.id] = true; });
+      var added = 0;
+      cloudData.forEach(function(t) {
+        if (!currentIds[t.id]) { trips.push(t); added++; }
+      });
+      if (added > 0) {
+        try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e) {}
+        render();
+        showToast('发现 ' + added + ' 条新行程已同步');
+      }
+      setSyncStatus('', '已同步');
+    }).catch(function(e) {
+      console.warn('Cloud check failed:', e);
+      setSyncStatus('', '已同步');
+    });
+  }
+
   // ===== 渲染 =====
   function render() {
     try {
@@ -442,7 +505,11 @@
 
             bodyHTML += '<div class="' + blockClass + '" style="left:calc(' + startPct + '% + 1px);width:calc(' + widthPct + '% - 2px)" data-trip-id="' + trip.id + '" title="' + titleStr.replace(/"/g, '&quot;') + '">';
             bodyHTML += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">' + label2 + '</span>';
-            bodyHTML += '<span class="delete-x" title="删除" data-del-id="' + trip.id + '">×</span>';
+            if (isExpired(trip)) {
+              bodyHTML += '<span class="lock-x" title="已过期不可删除">&#128274;</span>';
+            } else {
+              bodyHTML += '<span class="delete-x" title="删除" data-del-id="' + trip.id + '">×</span>';
+            }
             bodyHTML += '</div>';
           });
 
@@ -497,7 +564,13 @@
 
   // ===== 人员管理 =====
   function removePerson(name) {
-    if (!confirm('确定删除「' + name + '」的所有行程？')) return;
+    var personTrips = trips.filter(function(t) { return t.person === name; });
+    var activeCount = personTrips.filter(function(t) { return !isExpired(t); }).length;
+    var expiredCount = personTrips.length - activeCount;
+    var msg = '确定删除「' + name + '」的所有 ' + personTrips.length + ' 条行程？';
+    if (activeCount > 0) msg += '\n\n其中包含 ' + activeCount + ' 条未过期的行程！';
+    if (expiredCount > 0) msg += '\n（含 ' + expiredCount + ' 条已过期历史记录）';
+    if (!confirm(msg)) return;
     trips = trips.filter(function(t) { return t.person !== name; });
     render();
     cloudSave();
@@ -605,19 +678,34 @@
       trips.push(newTrip);
     }
 
-    // 用户主动保存，丢弃后台到达的旧云端数据（避免覆盖刚保存的内容）
+    // 用户主动保存前，先合并后台已到达的云端数据（防止覆盖旧数据）
+    if (window._pendingCloudTrips) {
+      mergePendingCloud();
+    }
     window._pendingCloudTrips = null;
     closeModal();
     render();
-    cloudSave();
+    cloudSave().then(function(ok) {
+      if (ok) cloudCheckNew(); // 保存后检查其他设备是否有新数据
+    });
   }
 
   function deleteTrip(id) {
-    if (confirm('确定删除这条出差行程？')) {
-      trips = trips.filter(function(t) { return t.id !== id; });
-      render();
-      cloudSave();
+    var trip = null;
+    for (var i = 0; i < trips.length; i++) {
+      if (trips[i].id === id) { trip = trips[i]; break; }
     }
+    if (!trip) return;
+    // 已过期的行程不可删除
+    if (isExpired(trip)) {
+      showToast('该行程已过期，不可删除（可编辑修改日期）');
+      return;
+    }
+    if (!confirm('确定删除该行程？\n\n' + trip.person + ' → ' + trip.dest + '\n' + trip.start + ' ~ ' + trip.end + (trip.note ? '\n事由：' + trip.note : ''))) return;
+    trips = trips.filter(function(t) { return t.id !== id; });
+    render();
+    cloudSave();
+    showToast('已删除');
   }
 
   // ===== 导出 CSV =====
@@ -668,6 +756,61 @@
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') closeModal();
   });
+
+  // ===== 刷新按钮 =====
+  document.getElementById('refreshBtn').addEventListener('click', function() {
+    setSyncStatus('saving', '正在刷新...');
+    cloudLoad().then(function() {
+      showToast('刷新完成');
+    });
+  });
+
+  // ===== 移动端下拉刷新 =====
+  (function() {
+    var touchStartY = 0;
+    var touchMoved = false;
+    var indicator = document.getElementById('pullIndicator');
+    var pullText = document.getElementById('pullText');
+    var spinner = indicator.querySelector('.pull-spinner');
+
+    document.addEventListener('touchstart', function(e) {
+      if (window.scrollY > 5) return;
+      touchStartY = e.touches[0].clientY;
+      touchMoved = false;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', function(e) {
+      var delta = e.touches[0].clientY - touchStartY;
+      if (window.scrollY <= 5 && delta > 30 && !touchMoved) {
+        touchMoved = true;
+        indicator.classList.add('active');
+        pullText.textContent = '下拉刷新';
+      }
+      if (touchMoved && delta > 70) {
+        pullText.textContent = '释放刷新';
+      }
+    }, { passive: true });
+
+    document.addEventListener('touchend', function() {
+      if (!touchMoved) return;
+      var pullTextEl = pullText;
+      if (pullTextEl.textContent === '释放刷新') {
+        spinner.style.display = 'inline-block';
+        pullTextEl.textContent = '正在刷新...';
+        indicator.classList.add('active');
+        cloudLoad().then(function() {
+          setTimeout(function() {
+            indicator.classList.remove('active');
+            spinner.style.display = 'none';
+            showToast('刷新完成');
+          }, 400);
+        });
+      } else {
+        indicator.classList.remove('active');
+      }
+      touchMoved = false;
+    });
+  })();
 
   // ===== 启动 =====
   cloudLoad();
