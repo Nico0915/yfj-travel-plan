@@ -565,11 +565,14 @@
   // ===== 人员管理 =====
   function removePerson(name) {
     var personTrips = trips.filter(function(t) { return t.person === name; });
-    var activeCount = personTrips.filter(function(t) { return !isExpired(t); }).length;
-    var expiredCount = personTrips.length - activeCount;
-    var msg = '确定删除「' + name + '」的所有 ' + personTrips.length + ' 条行程？';
-    if (activeCount > 0) msg += '\n\n其中包含 ' + activeCount + ' 条未过期的行程！';
-    if (expiredCount > 0) msg += '\n（含 ' + expiredCount + ' 条已过期历史记录）';
+    var expiredCount = personTrips.filter(function(t) { return isExpired(t); }).length;
+    var activeCount = personTrips.length - expiredCount;
+    // 存在已过期行程 → 禁止删除整人（防止绕过单条锁定）
+    if (expiredCount > 0) {
+      showToast('「' + name + '」有 ' + expiredCount + ' 条已过期行程，不可删除该人员（过期行程受保护）');
+      return;
+    }
+    var msg = '确定删除「' + name + '」的所有 ' + activeCount + ' 条行程？';
     if (!confirm(msg)) return;
     trips = trips.filter(function(t) { return t.person !== name; });
     render();
