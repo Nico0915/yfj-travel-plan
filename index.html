@@ -478,7 +478,11 @@
         peopleOrder.forEach(function(personName) {
           var personTrips = peopleGroups[personName];
           bodyHTML += '<div class="gantt-row">';
-          bodyHTML += '<div class="gantt-row-label"><span>' + personName + '</span><span class="person-del" title="删除此人所有行程" data-person="' + personName + '">×</span></div>';
+          var hasExpiredTrips = trips.some(function(t) { return t.person === personName && isExpired(t); });
+          var delIcon = hasExpiredTrips
+            ? '<span class="lock-x" title="该人员有过期行程，不可删除">&#128274;</span>'
+            : '<span class="person-del" title="删除此人所有行程" data-person="' + personName + '">×</span>';
+          bodyHTML += '<div class="gantt-row-label"><span>' + personName + '</span>' + delIcon + '</div>';
           bodyHTML += '<div class="gantt-cells">';
 
           // 背景网格
