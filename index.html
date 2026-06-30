@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>yfj_travel_plan v3</title>
+<title>yfj_travel_plan v5</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f5f4f0; color: #2c2c2a; font-size: 13px; }
@@ -278,12 +278,26 @@
     return Object.keys(busySet).length;
   }
 
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   function showToast(msg) {
     var toast = document.getElementById('toast');
     toast.textContent = msg;
     toast.classList.add('show');
     clearTimeout(toast._timer);
     toast._timer = setTimeout(function() { toast.classList.remove('show'); }, 3000);
+  }
+
+  function saveLocal() {
+    try {
+      localStorage.setItem('yfj_travel_backup', JSON.stringify(trips));
+      localStorage.setItem('yfj_travel_lastLocalChange', Date.now().toString());
+    } catch(e) {
+      console.warn('localStorage save failed:', e.message);
+    }
   }
 
   function setSyncStatus(status, text) {
@@ -298,9 +312,16 @@
 
   function cloudLoad() {
     _cloudSyncDone = false;
-    // 立即用本地缓存渲染，无需等待云端
+    // 读取本地缓存 + 时间戳
     var cached = null;
-    try { cached = JSON.parse(localStorage.getItem('yfj_travel_backup') || 'null'); } catch(e) {}
+    var lastLocal = 0;
+    var lastCloudSync = 0;
+    try {
+      cached = JSON.parse(localStorage.getItem('yfj_travel_backup') || 'null');
+      lastLocal = parseInt(localStorage.getItem('yfj_travel_lastLocalChange') || '0');
+      lastCloudSync = parseInt(localStorage.getItem('yfj_travel_lastCloudSync') || '0');
+    } catch(e) {}
+
     if (cached && Array.isArray(cached) && cached.length > 0) {
       trips = cached;
       setSyncStatus('saving', '正在从云端同步...');
@@ -323,26 +344,51 @@
         cloudTrips = [];
       }
       _cloudSyncDone = true;
-      // 🔒 防御：如果云端返回空数据但本地有数据，说明云端异常，不覆盖
+
+      // 🔒 防御1：云端空 + 本地有数据 → 用本地修复云端
       if (cloudTrips.length === 0 && trips.length > 0) {
         setSyncStatus('error', '云端数据异常（为空），保留本地数据，未覆盖');
-        // 尝试把本地数据回写到云端（修复云端）
         return fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ data: trips })
         }).then(function() {
+          localStorage.setItem('yfj_travel_lastCloudSync', Date.now().toString());
           setSyncStatus('', '已同步（本地数据已恢复至云端）');
         }).catch(function() {
           setSyncStatus('error', '云端暂不可达，使用本地数据');
         });
       }
+
+      // 🔒 防御2：本地数据比上次同步时间更新 → 用户本地有未同步的改动，优先保留本地
+      if (cloudTrips.length > 0 && trips.length > 0 && lastLocal > lastCloudSync) {
+        // 合并：本地为主，补入云端新增的（本地没有的）行程
+        var localIds = {};
+        trips.forEach(function(t) { localIds[t.id] = true; });
+        cloudTrips.forEach(function(t) {
+          if (!localIds[t.id]) { trips.push(t); }
+        });
+        saveLocal();
+        setSyncStatus('saving', '本地数据较新，正在同步到云端...');
+        // 把合并后的数据推送云端
+        return fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: trips })
+        }).then(function() {
+          localStorage.setItem('yfj_travel_lastCloudSync', Date.now().toString());
+          setSyncStatus('', '已同步');
+          render();
+        }).catch(function() {
+          setSyncStatus('error', '云端暂不可达，使用本地数据');
+        });
+      }
+
+      // 正常情况：云端数据更新或一致，使用云端
       try { localStorage.setItem('yfj_travel_backup', JSON.stringify(cloudTrips)); } catch(e) {}
-      // 如果模态框正在打开（用户正在编辑），不覆盖当前 trips，只更新缓存
       var modal = document.getElementById('modalOverlay');
       if (modal && modal.style.display === 'flex') {
         setSyncStatus('', '已同步（当前编辑完成后生效）');
-        // 🔒 只在云端有数据时才暂存，空数据直接丢弃
         window._pendingCloudTrips = cloudTrips.length > 0 ? cloudTrips : null;
       } else {
         trips = cloudTrips;
@@ -362,29 +408,76 @@
     });
   }
 
+  var _cloudSaving = false; // 防并发保存锁
+
   function cloudSave() {
-    // 🔒 防御：禁止保存空数据到云端（防止意外清空）
+    // 🔒 防御：禁止保存空数据到云端
     if (!trips || trips.length === 0) {
       setSyncStatus('error', '数据为空，拒绝同步到云端');
       console.warn('cloudSave blocked: trips is empty');
       return Promise.resolve(false);
     }
+    // 🔒 防并发：正在保存中则跳过
+    if (_cloudSaving) {
+      console.warn('cloudSave skipped: already in progress');
+      return Promise.resolve(false);
+    }
+    _cloudSaving = true;
     setSyncStatus('saving', '正在同步到云端...');
-    window._pendingCloudTrips = null; // 保存时清除暂存的云端旧数据
-    return fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: trips })
+    window._pendingCloudTrips = null;
+
+    // 🔒 P1：预保存合并 — 先拉取云端最新数据，与本合并后再写入
+    return fetch(API_URL).then(function(res) {
+      if (!res.ok) throw new Error('pre-fetch HTTP ' + res.status);
+      return res.json();
+    }).catch(function() {
+      return null; // 云端不可达，仅使用本地数据
+    }).then(function(cloudObj) {
+      var cloudData = null;
+      if (cloudObj && cloudObj.data && Array.isArray(cloudObj.data)) {
+        cloudData = cloudObj.data;
+      } else if (Array.isArray(cloudObj)) {
+        cloudData = cloudObj;
+      }
+
+      if (cloudData && cloudData.length > 0) {
+        // 合并：本地为主（同 ID 覆盖），补入云端新增的
+        var localIds = {};
+        var merged = [];
+        trips.forEach(function(t) {
+          localIds[t.id] = true;
+          merged.push(t);
+        });
+        cloudData.forEach(function(t) {
+          if (!localIds[t.id]) {
+            merged.push(t);
+          }
+        });
+        if (merged.length > trips.length) {
+          trips = merged;
+          saveLocal();
+        }
+      }
+
+      // 写入云端
+      return fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: trips })
+      });
     }).then(function(res) {
       if (res.ok) {
-        try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e) {}
+        _cloudSaving = false;
+        saveLocal();
+        localStorage.setItem('yfj_travel_lastCloudSync', Date.now().toString());
         setSyncStatus('', '已同步');
         return true;
       }
       throw new Error('Save HTTP ' + res.status);
     }).catch(function(e) {
       console.warn('Cloud save failed:', e);
-      try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e2) {}
+      _cloudSaving = false;
+      saveLocal(); // 保存到本地，标记未同步
       setSyncStatus('error', '同步失败 — 数据已保存在本地，稍后刷新重试');
       return false;
     });
@@ -404,7 +497,7 @@
     });
     window._pendingCloudTrips = null;
     if (added > 0) {
-      try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e) {}
+      saveLocal();
     }
   }
 
@@ -422,7 +515,7 @@
         if (!currentIds[t.id]) { trips.push(t); added++; }
       });
       if (added > 0) {
-        try { localStorage.setItem('yfj_travel_backup', JSON.stringify(trips)); } catch(e) {}
+        saveLocal();
         render();
         showToast('发现 ' + added + ' 条新行程已同步');
       }
@@ -461,7 +554,7 @@
       } else {
         personOrder.forEach(function(pName) {
           var pDays = countPersonBusyDays(currentYear, currentMonth, totalDays, pName);
-          statsHTML += '<div class="person-stats-row"><span class="ps-name">' + pName + '</span><span class="ps-trips"><b>' + peopleInMonth[pName].trips + '</b>行程</span><span class="ps-sep">·</span><span class="ps-days"><b>' + pDays + '</b>天出差</span></div>';
+          statsHTML += '<div class="person-stats-row"><span class="ps-name">' + escapeHtml(pName) + '</span><span class="ps-trips"><b>' + peopleInMonth[pName].trips + '</b>行程</span><span class="ps-sep">·</span><span class="ps-days"><b>' + pDays + '</b>天出差</span></div>';
         });
       }
       personStatsEl.innerHTML = statsHTML;
@@ -500,11 +593,13 @@
         peopleOrder.forEach(function(personName) {
           var personTrips = peopleGroups[personName];
           bodyHTML += '<div class="gantt-row">';
+          var escPerson = escapeHtml(personName);
+          var attrPerson = personName.replace(/"/g, '&quot;');
           var hasExpiredTrips = trips.some(function(t) { return t.person === personName && isExpired(t); });
           var delIcon = hasExpiredTrips
             ? '<span class="lock-x" title="该人员有过期行程，不可删除">&#128274;</span>'
-            : '<span class="person-del" title="删除此人所有行程" data-person="' + personName + '">×</span>';
-          bodyHTML += '<div class="gantt-row-label"><span>' + personName + '</span>' + delIcon + '</div>';
+            : '<span class="person-del" title="删除此人所有行程" data-person="' + attrPerson + '">×</span>';
+          bodyHTML += '<div class="gantt-row-label"><span>' + escPerson + '</span>' + delIcon + '</div>';
           bodyHTML += '<div class="gantt-cells">';
 
           // 背景网格
@@ -526,8 +621,8 @@
             var startPct = (startDay - 1) / totalDays * 100;
             var widthPct = (endDay - startDay + 1) / totalDays * 100;
 
-            var label2 = trip.note ? (trip.dest + ' · ' + trip.note) : trip.dest;
-            var titleStr = personName + ' · ' + trip.dest + '\n' + trip.start + ' ~ ' + trip.end + (trip.note ? '\n' + trip.note : '');
+            var label2 = trip.note ? (escapeHtml(trip.dest) + ' · ' + escapeHtml(trip.note)) : escapeHtml(trip.dest);
+            var titleStr = escapeHtml(personName) + ' · ' + escapeHtml(trip.dest) + '\n' + trip.start + ' ~ ' + trip.end + (trip.note ? '\n' + escapeHtml(trip.note) : '');
 
             bodyHTML += '<div class="' + blockClass + '" style="left:calc(' + startPct + '% + 1px);width:calc(' + widthPct + '% - 2px)" data-trip-id="' + trip.id + '" title="' + titleStr.replace(/"/g, '&quot;') + '">';
             bodyHTML += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">' + label2 + '</span>';
@@ -601,6 +696,7 @@
     var msg = '确定删除「' + name + '」的所有 ' + activeCount + ' 条行程？';
     if (!confirm(msg)) return;
     trips = trips.filter(function(t) { return t.person !== name; });
+    saveLocal(); // 🔒 立即保存到本地
     render();
     cloudSave();
     showToast('已删除 ' + name + ' 的所有行程');
@@ -692,7 +788,7 @@
 
     if (conflicting.length > 0) {
       var warn = document.getElementById('conflictWarn');
-      var conflictList = conflicting.map(function(t) { return t.dest + '（' + t.start + ' ~ ' + t.end + '）'; }).join('、');
+      var conflictList = conflicting.map(function(t) { return escapeHtml(t.dest) + '（' + t.start + ' ~ ' + t.end + '）'; }).join('、');
       warn.innerHTML = '<b>存在行程冲突，请更改日期后再保存。</b><br>「' + person + '」在该时间段已有行程：' + conflictList;
       warn.classList.add('show');
       showToast('存在行程冲突，请更改日期');
@@ -714,6 +810,7 @@
       mergePendingCloud();
     }
     window._pendingCloudTrips = null;
+    saveLocal(); // 🔒 立即保存到本地，云端同步失败也不丢数据
     closeModal();
     render();
     cloudSave().then(function(ok) {
@@ -734,6 +831,7 @@
     }
     if (!confirm('确定删除该行程？\n\n' + trip.person + ' → ' + trip.dest + '\n' + trip.start + ' ~ ' + trip.end + (trip.note ? '\n事由：' + trip.note : ''))) return;
     trips = trips.filter(function(t) { return t.id !== id; });
+    saveLocal(); // 🔒 立即保存到本地
     render();
     cloudSave();
     showToast('已删除');
