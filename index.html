@@ -323,12 +323,27 @@
         cloudTrips = [];
       }
       _cloudSyncDone = true;
+      // 🔒 防御：如果云端返回空数据但本地有数据，说明云端异常，不覆盖
+      if (cloudTrips.length === 0 && trips.length > 0) {
+        setSyncStatus('error', '云端数据异常（为空），保留本地数据，未覆盖');
+        // 尝试把本地数据回写到云端（修复云端）
+        return fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: trips })
+        }).then(function() {
+          setSyncStatus('', '已同步（本地数据已恢复至云端）');
+        }).catch(function() {
+          setSyncStatus('error', '云端暂不可达，使用本地数据');
+        });
+      }
       try { localStorage.setItem('yfj_travel_backup', JSON.stringify(cloudTrips)); } catch(e) {}
       // 如果模态框正在打开（用户正在编辑），不覆盖当前 trips，只更新缓存
       var modal = document.getElementById('modalOverlay');
       if (modal && modal.style.display === 'flex') {
         setSyncStatus('', '已同步（当前编辑完成后生效）');
-        window._pendingCloudTrips = cloudTrips;
+        // 🔒 只在云端有数据时才暂存，空数据直接丢弃
+        window._pendingCloudTrips = cloudTrips.length > 0 ? cloudTrips : null;
       } else {
         trips = cloudTrips;
         setSyncStatus('', '已同步');
@@ -348,6 +363,12 @@
   }
 
   function cloudSave() {
+    // 🔒 防御：禁止保存空数据到云端（防止意外清空）
+    if (!trips || trips.length === 0) {
+      setSyncStatus('error', '数据为空，拒绝同步到云端');
+      console.warn('cloudSave blocked: trips is empty');
+      return Promise.resolve(false);
+    }
     setSyncStatus('saving', '正在同步到云端...');
     window._pendingCloudTrips = null; // 保存时清除暂存的云端旧数据
     return fetch(API_URL, {
@@ -638,12 +659,14 @@
 
   function closeModal() {
     document.getElementById('modalOverlay').style.display = 'none';
-    // 如果云端数据在编辑期间到达，现在应用
-    if (window._pendingCloudTrips) {
+    // 如果云端数据在编辑期间到达，现在应用（需检查非空，[]是truthy！）
+    if (window._pendingCloudTrips && Array.isArray(window._pendingCloudTrips) && window._pendingCloudTrips.length > 0) {
       trips = window._pendingCloudTrips;
       window._pendingCloudTrips = null;
       setSyncStatus('', '已同步');
       render();
+    } else {
+      window._pendingCloudTrips = null; // 空数据直接丢弃
     }
   }
 
@@ -687,7 +710,7 @@
     }
 
     // 用户主动保存前，先合并后台已到达的云端数据（防止覆盖旧数据）
-    if (window._pendingCloudTrips) {
+    if (window._pendingCloudTrips && Array.isArray(window._pendingCloudTrips) && window._pendingCloudTrips.length > 0) {
       mergePendingCloud();
     }
     window._pendingCloudTrips = null;
