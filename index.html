@@ -381,6 +381,7 @@
           render();
         }).catch(function() {
           setSyncStatus('error', '云端暂不可达，使用本地数据');
+          render(); // 🔒 确保合并后的数据显示
         });
       }
 
