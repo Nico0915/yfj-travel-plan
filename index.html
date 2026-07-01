@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>yfj_travel_plan v5.2</title>
+<title>yfj_travel_plan v5.3</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f5f4f0; color: #2c2c2a; font-size: 13px; }
@@ -49,6 +49,8 @@
 
   .gantt-body { }
   .gantt-row { display: flex; border-bottom: 0.5px solid #f1efe8; min-height: 44px; }
+  .gantt-row.row-empty-month { opacity: 0.4; }
+  .gantt-row.row-empty-month .gantt-row-label::after { content: ' 本月无行程'; font-size: 11px; color: #b0ad9e; font-weight: 400; }
   .gantt-row:last-child { border-bottom: none; }
   .gantt-row-label { min-width: 110px; width: 110px; padding: 8px 10px; border-right: 0.5px solid #d3d1c7; font-size: 12px; font-weight: 500; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; color: #444441; }
   .gantt-row-label .person-del { cursor: pointer; opacity: 0; font-size: 14px; color: #E24B4A; transition: opacity 0.15s; margin-left: auto; padding-left: 4px; flex-shrink: 0; }
@@ -87,6 +89,7 @@
   .person-stats { background: #fff; border-radius: 8px; border: 0.5px solid #d3d1c7; margin-bottom: 20px; overflow: hidden; }
   .person-stats-row { display: flex; padding: 10px 14px; border-bottom: 0.5px solid #f1efe8; align-items: center; gap: 8px; }
   .person-stats-row:last-child { border-bottom: none; }
+  .person-stats-row.stats-empty-month { opacity: 0.4; }
   .ps-name { font-weight: 500; font-size: 13px; min-width: 70px; color: #444441; }
   .ps-trips { font-size: 13px; }
   .ps-trips b { color: #185FA5; }
@@ -476,58 +479,26 @@
     setSyncStatus('saving', '正在同步到云端...');
     window._pendingCloudTrips = null;
 
-    // 🔒 P1：预保存合并 — 先拉取云端最新数据，与本合并后再写入
-    return fetch(API_URL).then(function(res) {
-      if (!res.ok) throw new Error('pre-fetch HTTP ' + res.status);
-      return res.json();
-    }).catch(function() {
-      return null; // 云端不可达，仅使用本地数据
-    }).then(function(cloudObj) {
-      var cloudData = null;
-      if (cloudObj && cloudObj.data && Array.isArray(cloudObj.data)) {
-        cloudData = cloudObj.data;
-      } else if (Array.isArray(cloudObj)) {
-        cloudData = cloudObj;
-      }
-
-      if (cloudData && cloudData.length > 0) {
-        // 合并：本地为主（同 ID 覆盖），补入云端新增的
-        var localIds = {};
-        var merged = [];
-        trips.forEach(function(t) {
-          localIds[t.id] = true;
-          merged.push(t);
-        });
-        cloudData.forEach(function(t) {
-          if (!localIds[t.id]) {
-            merged.push(t);
-          }
-        });
-        if (merged.length > trips.length) {
-          trips = merged;
-          saveLocal();
-        }
-      }
-
-      // 写入云端
-      return fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: trips })
-      });
+    // 直接 POST 本地数据（不再预合并云端，避免撤销删除）
+    return fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: trips })
     }).then(function(res) {
       if (res.ok) {
         _cloudSaving = false;
         saveLocal();
         localStorage.setItem('yfj_travel_lastCloudSync', Date.now().toString());
         setSyncStatus('', '已同步');
+        // 保存后静默检查其他设备新增的行程
+        cloudCheckNew();
         return true;
       }
       throw new Error('Save HTTP ' + res.status);
     }).catch(function(e) {
       console.warn('Cloud save failed:', e);
       _cloudSaving = false;
-      saveLocal(); // 保存到本地，标记未同步
+      saveLocal();
       setSyncStatus('error', '同步失败 — 数据已保存在本地，稍后刷新重试');
       return false;
     });
@@ -589,22 +560,17 @@
 
       var monthTrips = trips.filter(function(t) { return t.start <= monthEnd && t.end >= monthStart; });
 
-      // 按人员统计
+      // 按人员统计（显示所有人员）
       var personStatsEl = document.getElementById('personStats');
-      var peopleInMonth = {};
-      monthTrips.forEach(function(t) {
-        var p = t.person || '(未分配)';
-        if (!peopleInMonth[p]) peopleInMonth[p] = { trips: 0 };
-        peopleInMonth[p].trips++;
-      });
-      var personOrder = Object.keys(peopleInMonth).sort(function(a,b) { return a.localeCompare(b, 'zh-CN'); });
+      var allPeopleStats = getAllPeople();
       var statsHTML = '';
-      if (personOrder.length === 0) {
-        statsHTML = '<div class="person-stats-row" style="color:#888780;font-size:12px">本月暂无出差行程</div>';
+      if (allPeopleStats.length === 0) {
+        statsHTML = '<div class="person-stats-row" style="color:#888780;font-size:12px">暂无出差行程</div>';
       } else {
-        personOrder.forEach(function(pName) {
-          var pDays = countPersonBusyDays(currentYear, currentMonth, totalDays, pName);
-          statsHTML += '<div class="person-stats-row"><span class="ps-name">' + escapeHtml(pName) + '</span><span class="ps-trips"><b>' + peopleInMonth[pName].trips + '</b>行程</span><span class="ps-sep">·</span><span class="ps-days"><b>' + pDays + '</b>天出差</span></div>';
+        allPeopleStats.forEach(function(pName) {
+          var pTrips = trips.filter(function(t) { return (t.person || '(未分配)') === pName && t.start <= monthEnd && t.end >= monthStart; }).length;
+          var pDays = pTrips > 0 ? countPersonBusyDays(currentYear, currentMonth, totalDays, pName) : 0;
+          statsHTML += '<div class="person-stats-row' + (pTrips === 0 ? ' stats-empty-month' : '') + '"><span class="ps-name">' + escapeHtml(pName) + '</span><span class="ps-trips"><b>' + pTrips + '</b>行程</span><span class="ps-sep">·</span><span class="ps-days"><b>' + pDays + '</b>天出差</span></div>';
         });
       }
       personStatsEl.innerHTML = statsHTML;
@@ -624,25 +590,26 @@
       headerHTML += '</div></div>';
       wrap.innerHTML = headerHTML;
 
-      // 按人员分组
+      // 按人员分组（显示所有人员，含无当月行程者）
+      var allPeople = getAllPeople();
       var peopleGroups = {};
-      var visibleTrips = trips.filter(function(t) { return t.start <= monthEnd && t.end >= monthStart; });
-      visibleTrips.forEach(function(t) {
-        var p = t.person || '(未分配)';
-        if (!peopleGroups[p]) peopleGroups[p] = [];
-        peopleGroups[p].push(t);
+      allPeople.forEach(function(p) {
+        peopleGroups[p] = trips.filter(function(t) {
+          return (t.person || '(未分配)') === p && t.start <= monthEnd && t.end >= monthStart;
+        });
       });
 
-      var peopleOrder = Object.keys(peopleGroups).sort(function(a,b) { return a.localeCompare(b, 'zh-CN'); });
+      var peopleOrder = allPeople.sort(function(a,b) { return a.localeCompare(b, 'zh-CN'); });
 
       var bodyHTML = '';
 
       if (peopleOrder.length === 0) {
-        bodyHTML = '<div class="no-trips">本月暂无出差行程，点击上方「新增行程」开始规划</div>';
+        bodyHTML = '<div class="no-trips">暂无出差行程，点击上方「新增行程」开始规划</div>';
       } else {
         peopleOrder.forEach(function(personName) {
           var personTrips = peopleGroups[personName];
-          bodyHTML += '<div class="gantt-row">';
+          var hasNoTripsThisMonth = (personTrips.length === 0);
+          bodyHTML += '<div class="gantt-row' + (hasNoTripsThisMonth ? ' row-empty-month' : '') + '">';
           var escPerson = escapeHtml(personName);
           var attrPerson = personName.replace(/"/g, '&quot;');
           var hasExpiredTrips = trips.some(function(t) { return t.person === personName && isExpired(t); });
@@ -863,9 +830,7 @@
     saveLocal(); // 🔒 立即保存到本地，云端同步失败也不丢数据
     closeModal();
     render();
-    cloudSave().then(function(ok) {
-      if (ok) cloudCheckNew(); // 保存后检查其他设备是否有新数据
-    });
+    cloudSave();
   }
 
   function deleteTrip(id) {
