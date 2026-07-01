@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>yfj_travel_plan v5.3</title>
+<title>yfj_travel_plan v5.4</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f5f4f0; color: #2c2c2a; font-size: 13px; }
@@ -294,22 +294,6 @@
     toast._timer = setTimeout(function() { toast.classList.remove('show'); }, 3000);
   }
 
-  // 🔒 自动跳转到有数据的最新月份（避免跨月时空白）
-  function autoNavToDataMonth() {
-    if (!trips || trips.length === 0) return;
-    var ms = dateStr(currentYear, currentMonth, 1);
-    var me = dateStr(currentYear, currentMonth, daysInMonth(currentYear, currentMonth));
-    var hasVisible = trips.some(function(t) { return t.start <= me && t.end >= ms; });
-    if (!hasVisible) {
-      var latestEnd = trips.reduce(function(m, t) { return t.end > m ? t.end : m; }, '');
-      if (latestEnd) {
-        var parts = latestEnd.split('-');
-        currentYear = parseInt(parts[0]);
-        currentMonth = parseInt(parts[1]) - 1;
-      }
-    }
-  }
-
   function saveLocal() {
     // 🔒 不缓存空数据，防止下次加载时误判为"有缓存"
     if (!trips || trips.length === 0) return;
@@ -441,7 +425,6 @@
         window._pendingCloudTrips = cloudTrips.length > 0 ? cloudTrips : null;
       } else {
         trips = cloudTrips;
-        autoNavToDataMonth();
         setSyncStatus('', '已同步');
         render();
       }
@@ -452,7 +435,6 @@
       if (cached && Array.isArray(cached) && cached.length > 0) {
         setSyncStatus('error', '云端暂不可达 — 显示本地缓存数据');
         trips = cached;
-        autoNavToDataMonth();
         render();
       } else {
         setSyncStatus('error', '云端暂不可达，请检查网络后点击刷新');
@@ -560,17 +542,22 @@
 
       var monthTrips = trips.filter(function(t) { return t.start <= monthEnd && t.end >= monthStart; });
 
-      // 按人员统计（显示所有人员）
+      // 按人员统计（仅显示当月有行程的人员）
       var personStatsEl = document.getElementById('personStats');
-      var allPeopleStats = getAllPeople();
+      var monthPeopleMap = {};
+      monthTrips.forEach(function(t) {
+        var pn = t.person || '(未分配)';
+        monthPeopleMap[pn] = true;
+      });
+      var allPeopleStats = Object.keys(monthPeopleMap).sort(function(a,b) { return a.localeCompare(b, 'zh-CN'); });
       var statsHTML = '';
       if (allPeopleStats.length === 0) {
-        statsHTML = '<div class="person-stats-row" style="color:#888780;font-size:12px">暂无出差行程</div>';
+        statsHTML = '<div class="person-stats-row" style="color:#888780;font-size:12px">本月暂无出差行程</div>';
       } else {
         allPeopleStats.forEach(function(pName) {
-          var pTrips = trips.filter(function(t) { return (t.person || '(未分配)') === pName && t.start <= monthEnd && t.end >= monthStart; }).length;
-          var pDays = pTrips > 0 ? countPersonBusyDays(currentYear, currentMonth, totalDays, pName) : 0;
-          statsHTML += '<div class="person-stats-row' + (pTrips === 0 ? ' stats-empty-month' : '') + '"><span class="ps-name">' + escapeHtml(pName) + '</span><span class="ps-trips"><b>' + pTrips + '</b>行程</span><span class="ps-sep">·</span><span class="ps-days"><b>' + pDays + '</b>天出差</span></div>';
+          var pTrips = monthTrips.filter(function(t) { return (t.person || '(未分配)') === pName; }).length;
+          var pDays = countPersonBusyDays(currentYear, currentMonth, totalDays, pName);
+          statsHTML += '<div class="person-stats-row"><span class="ps-name">' + escapeHtml(pName) + '</span><span class="ps-trips"><b>' + pTrips + '</b>行程</span><span class="ps-sep">·</span><span class="ps-days"><b>' + pDays + '</b>天出差</span></div>';
         });
       }
       personStatsEl.innerHTML = statsHTML;
@@ -590,26 +577,19 @@
       headerHTML += '</div></div>';
       wrap.innerHTML = headerHTML;
 
-      // 按人员分组（显示所有人员，含无当月行程者）
-      var allPeople = getAllPeople();
-      var peopleGroups = {};
-      allPeople.forEach(function(p) {
-        peopleGroups[p] = trips.filter(function(t) {
-          return (t.person || '(未分配)') === p && t.start <= monthEnd && t.end >= monthStart;
-        });
-      });
-
-      var peopleOrder = allPeople.sort(function(a,b) { return a.localeCompare(b, 'zh-CN'); });
+      // 按人员分组（仅显示当月有行程的人员）
+      var peopleOrder = Object.keys(monthPeopleMap).sort(function(a,b) { return a.localeCompare(b, 'zh-CN'); });
 
       var bodyHTML = '';
 
       if (peopleOrder.length === 0) {
-        bodyHTML = '<div class="no-trips">暂无出差行程，点击上方「新增行程」开始规划</div>';
+        bodyHTML = '<div class="no-trips">本月暂无出差行程，点击上方「新增行程」开始规划</div>';
       } else {
         peopleOrder.forEach(function(personName) {
-          var personTrips = peopleGroups[personName];
-          var hasNoTripsThisMonth = (personTrips.length === 0);
-          bodyHTML += '<div class="gantt-row' + (hasNoTripsThisMonth ? ' row-empty-month' : '') + '">';
+          var personTrips = monthTrips.filter(function(t) {
+            return (t.person || '(未分配)') === personName;
+          });
+          bodyHTML += '<div class="gantt-row">';
           var escPerson = escapeHtml(personName);
           var attrPerson = personName.replace(/"/g, '&quot;');
           var hasExpiredTrips = trips.some(function(t) { return t.person === personName && isExpired(t); });
@@ -845,7 +825,17 @@
       return;
     }
     if (!confirm('确定删除该行程？\n\n' + trip.person + ' → ' + trip.dest + '\n' + trip.start + ' ~ ' + trip.end + (trip.note ? '\n事由：' + trip.note : ''))) return;
+    var personName = trip.person;
     trips = trips.filter(function(t) { return t.id !== id; });
+    // 删除后检查：如果该人员剩余行程全部是未开始的，则一起清除
+    var remainingTrips = trips.filter(function(t) { return t.person === personName; });
+    if (remainingTrips.length > 0) {
+      var todayStr = dateStr(today.getFullYear(), today.getMonth(), today.getDate());
+      var allFuture = remainingTrips.every(function(t) { return t.start > todayStr; });
+      if (allFuture) {
+        trips = trips.filter(function(t) { return t.person !== personName; });
+      }
+    }
     saveLocal(); // 🔒 立即保存到本地
     render();
     cloudSave();
