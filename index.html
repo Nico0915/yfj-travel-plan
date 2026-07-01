@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>yfj_travel_plan v5</title>
+<title>yfj_travel_plan v5.2</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f5f4f0; color: #2c2c2a; font-size: 13px; }
@@ -291,6 +291,22 @@
     toast._timer = setTimeout(function() { toast.classList.remove('show'); }, 3000);
   }
 
+  // 🔒 自动跳转到有数据的最新月份（避免跨月时空白）
+  function autoNavToDataMonth() {
+    if (!trips || trips.length === 0) return;
+    var ms = dateStr(currentYear, currentMonth, 1);
+    var me = dateStr(currentYear, currentMonth, daysInMonth(currentYear, currentMonth));
+    var hasVisible = trips.some(function(t) { return t.start <= me && t.end >= ms; });
+    if (!hasVisible) {
+      var latestEnd = trips.reduce(function(m, t) { return t.end > m ? t.end : m; }, '');
+      if (latestEnd) {
+        var parts = latestEnd.split('-');
+        currentYear = parseInt(parts[0]);
+        currentMonth = parseInt(parts[1]) - 1;
+      }
+    }
+  }
+
   function saveLocal() {
     // 🔒 不缓存空数据，防止下次加载时误判为"有缓存"
     if (!trips || trips.length === 0) return;
@@ -422,6 +438,7 @@
         window._pendingCloudTrips = cloudTrips.length > 0 ? cloudTrips : null;
       } else {
         trips = cloudTrips;
+        autoNavToDataMonth();
         setSyncStatus('', '已同步');
         render();
       }
@@ -432,6 +449,7 @@
       if (cached && Array.isArray(cached) && cached.length > 0) {
         setSyncStatus('error', '云端暂不可达 — 显示本地缓存数据');
         trips = cached;
+        autoNavToDataMonth();
         render();
       } else {
         setSyncStatus('error', '云端暂不可达，请检查网络后点击刷新');
