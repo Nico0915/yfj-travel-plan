@@ -292,6 +292,8 @@
   }
 
   function saveLocal() {
+    // 🔒 不缓存空数据，防止下次加载时误判为"有缓存"
+    if (!trips || trips.length === 0) return;
     try {
       localStorage.setItem('yfj_travel_backup', JSON.stringify(trips));
       localStorage.setItem('yfj_travel_lastLocalChange', Date.now().toString());
@@ -310,6 +312,28 @@
   // ===== 云端存储 =====
   var _cloudSyncDone = false; // 标记云端数据是否已加载完成
 
+  // 带重试的 fetch（弱网环境自动重试 3 次）
+  function fetchWithRetry(url, maxRetries) {
+    var retries = maxRetries || 3;
+    var attempt = 0;
+    function tryFetch() {
+      return fetch(url).then(function(res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res;
+      }).catch(function(e) {
+        attempt++;
+        if (attempt < retries) {
+          console.warn('fetch retry ' + attempt + '/' + retries + ' for ' + url);
+          return new Promise(function(resolve) {
+            setTimeout(function() { resolve(tryFetch()); }, attempt * 1000);
+          });
+        }
+        throw e;
+      });
+    }
+    return tryFetch();
+  }
+
   function cloudLoad() {
     _cloudSyncDone = false;
     // 读取本地缓存 + 时间戳
@@ -321,6 +345,11 @@
       lastLocal = parseInt(localStorage.getItem('yfj_travel_lastLocalChange') || '0');
       lastCloudSync = parseInt(localStorage.getItem('yfj_travel_lastCloudSync') || '0');
     } catch(e) {}
+    // 清理残留的空缓存（防止误判）
+    if (cached && Array.isArray(cached) && cached.length === 0) {
+      cached = null;
+      try { localStorage.removeItem('yfj_travel_backup'); } catch(e) {}
+    }
 
     if (cached && Array.isArray(cached) && cached.length > 0) {
       trips = cached;
@@ -330,8 +359,8 @@
       setSyncStatus('saving', '正在加载...');
     }
 
-    // 后台拉取云端最新数据
-    return fetch(API_URL).then(function(res) {
+    // 后台拉取云端最新数据（弱网自动重试 3 次）
+    return fetchWithRetry(API_URL).then(function(res) {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.json();
     }).then(function(obj) {
@@ -399,12 +428,14 @@
     }).catch(function(e) {
       console.warn('Cloud load failed:', e);
       _cloudSyncDone = true;
-      if (cached && Array.isArray(cached)) {
+      // 🔒 必须检查 length>0，空数组 [] 是 truthy！
+      if (cached && Array.isArray(cached) && cached.length > 0) {
         setSyncStatus('error', '云端暂不可达 — 显示本地缓存数据');
-      } else {
-        setSyncStatus('error', '云端暂不可达');
-        trips = [];
+        trips = cached;
         render();
+      } else {
+        setSyncStatus('error', '云端暂不可达，请检查网络后点击刷新');
+        if (trips.length === 0) { trips = []; render(); }
       }
     });
   }
