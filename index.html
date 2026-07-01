@@ -825,17 +825,7 @@
       return;
     }
     if (!confirm('确定删除该行程？\n\n' + trip.person + ' → ' + trip.dest + '\n' + trip.start + ' ~ ' + trip.end + (trip.note ? '\n事由：' + trip.note : ''))) return;
-    var personName = trip.person;
     trips = trips.filter(function(t) { return t.id !== id; });
-    // 删除后检查：如果该人员剩余行程全部是未开始的，则一起清除
-    var remainingTrips = trips.filter(function(t) { return t.person === personName; });
-    if (remainingTrips.length > 0) {
-      var todayStr = dateStr(today.getFullYear(), today.getMonth(), today.getDate());
-      var allFuture = remainingTrips.every(function(t) { return t.start > todayStr; });
-      if (allFuture) {
-        trips = trips.filter(function(t) { return t.person !== personName; });
-      }
-    }
     saveLocal(); // 🔒 立即保存到本地
     render();
     cloudSave();
